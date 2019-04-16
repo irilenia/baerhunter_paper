@@ -1,0 +1,595 @@
+---
+title: "Simulations for baerHunter paper"
+author: "Original: Alina Ozuna ; Modifications (mostly comments): Irilenia Nobeli"
+date: "April 15, 2019"
+output: html_document
+---
+
+# SIMULATION OF RNA-SEQ DATASETS FOR TESTING *baerHunter*
+## Setup
+Configuring knitr and setting up R libraries...
+
+```{r "knitr config", cache = FALSE, include=FALSE}
+require("knitr")
+opts_chunk$set(echo = TRUE)
+#set the root directory to the project directory so all paths
+#that follow will be relative to that.
+opts_knit$set(root.dir = "../")
+```
+
+```{r setup, include=FALSE}
+library(polyester)
+library(Biostrings)
+```
+
+```{r setup_directories}
+system("mkdir output/")
+system("mkdir output/simulations/")
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR")
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20")
+```
+
+## Loading and modifying development version of *polyester* package
+The current version of *polyester* does not create stranded libraries, so some functions have to be loaded from the development version.
+### STARTING CODE FROM *polyester* 
+```{r dev_functions}
+.makepretty = function(x){
+    msg = gsub('\n', ' ', x)
+    msg = gsub('    ', '', msg)
+    msg
+}
+
+.check_error_model = function(extras, paired){
+
+    # make sure it's an available model
+    error_model = match.arg(extras$error_model,
+        c('uniform', 'illumina4', 'illumina5', 'custom'))
+
+    # check uniform model --> error rate
+    if(error_model == 'uniform'){
+        if('error_rate' %in% names(extras)){
+            error_rate = extras$error_rate
+            stopifnot(is.numeric(error_rate))
+            stopifnot(error_rate >= 0 & error_rate <= 1)
+        }
+    }
+
+    # check paths and such for custom model
+    if(error_model == 'custom'){
+        if(!('model_path' %in% names(extras)) |
+            !('model_prefix' %in% names(extras))){
+            stop(.makepretty('with custom error models, you must provide both
+                the path to the folder that holds your error model
+                (model_path) and the prefix of your error model (model_prefix),
+                where the prefix is whatever comes before _mate1 and _mate2
+                (for paired reads) or _single (for single-end reads). You
+                provided prefix when running build_error_models.py.'))
+        }
+        model_path = extras$model_path
+        model_prefix = extras$model_prefix
+        if(paired){
+            if(!file.exists(paste0(model_path, '/', model_prefix, '_mate1')) |
+               !file.exists(paste0(model_path, '/', model_prefix, '_mate2'))){
+               stop('could not find error model')
+            }
+        }else{
+            if(!file.exists(paste0(model_path, '/', model_prefix, '_single'))){
+                stop('could not find error model')
+            }
+        }
+    }
+}
+
+.check_fold_changes = function(fold_changes, num_reps, transcripts){
+
+    # make sure fold change matrix is compatible with experiment size
+    if(length(num_reps) == 1 | length(num_reps) == 2){
+        stopifnot(is.numeric(fold_changes))
+    }else{
+        stopifnot(is.matrix(fold_changes))
+        if(ncol(fold_changes) != length(num_reps)){
+            stop(.makepretty('wrong number of columns in fold change matrix:
+                need same number of columns as number of groups.'))
+        }
+        if(nrow(fold_changes) != length(transcripts)){
+            stop(.makepretty('wrong number of rows in fold change matrix: need
+                same number of rows as number of simulated transcripts. see
+                count_transcripts to find out that number.'))
+        }
+    }
+}
+
+.write_info = function(extras, transcripts, num_reps, fold_changes, outdir,
+    group_ids, counts_matrix){
+
+    if(!('transcriptid' %in% names(extras))){
+        extras$transcriptid = names(transcripts)
+    }
+
+    if(is.numeric(fold_changes)){
+        sim_info = data.frame(transcriptid=extras$transcriptid,
+            foldchange=fold_changes, DEstatus=fold_changes!=1)
+    }else{
+        fcv = apply(fold_changes, 1, function(x){
+            paste(x, collapse=';')
+        })
+        DEstatus = rowSums(fold_changes) != ncol(fold_changes)
+        sim_info = data.frame(transcriptid=extras$transcriptid,
+            foldchange=fcv, DEstatus=DEstatus)
+    }
+
+    write.table(sim_info, row.names=FALSE, quote=FALSE, sep="\t",
+            file=paste0(outdir, '/sim_tx_info.txt'))
+
+    rep_info = data.frame(
+        rep_id=paste0('sample_', sprintf('%02d', 1:sum(num_reps))),
+        group=group_ids, lib_sizes=extras$lib_sizes)
+
+    write.table(rep_info, row.names=FALSE, quote=FALSE, sep='\t',
+                file=paste0(outdir, '/sim_rep_info.txt'))
+
+    rownames(counts_matrix) <- names(transcripts)
+    colnames(counts_matrix) <- rep_info$rep_id
+    save(counts_matrix, file=paste0(outdir, '/sim_counts_matrix.rda'))
+}
+
+
+simulate_experiment = function(fasta=NULL, gtf=NULL, seqpath=NULL,
+    outdir='.', num_reps=c(10,10), reads_per_transcript=300, size=NULL,
+    fold_changes, paired=TRUE, reportCoverage=FALSE, ...){
+
+    extras = list(...)
+
+    # validate extra arguments/set sane defaults
+    extras = .check_extras(extras, paired, total.n=sum(num_reps))
+
+    # read in the annotated transcripts to sequence from
+    if(!is.null(fasta) & is.null(gtf) & is.null(seqpath)){
+        transcripts = readDNAStringSet(fasta)
+    }else if(is.null(fasta) & !is.null(gtf) & !is.null(seqpath)){
+        message('parsing gtf and sequences...')
+        # parse out any extra seq_gtf arguments from the ... args
+        if('exononly' %in% names(extras)){
+            exononly = extras$exononly
+        }else{
+            exononly = TRUE
+        }
+        if('idfield' %in% names(extras)){
+            idfield = extras$idfield
+        }else{
+            idfield = 'transcript_id'        
+        }
+        if('attrsep' %in% names(extras)){
+            attrsep = extras$attrsep
+        }else{
+            attrsep = '; '
+        }
+        transcripts = seq_gtf(gtf, seqpath, feature='transcript',
+            exononly=exononly, idfield=idfield, attrsep=attrsep)
+        message('done parsing')
+    }else{
+        stop('must provide either fasta or both gtf and seqpath')
+    }
+
+    # check fold change matrix dimensions:
+    .check_fold_changes(fold_changes, num_reps, transcripts)
+
+    # get baseline means for each group, incl. fold changes:
+    if('meanmodel' %in% names(extras)){
+        b0 = -3.0158
+        b1 = 0.8688
+        sigma = 4.152
+        logmus = b0 + b1*log2(width(transcripts)) + rnorm(length(transcripts),0,sigma)
+        reads_per_transcript = 2^logmus-1
+        reads_per_transcript = pmax( reads_per_transcript, 1e-6 )
+    }
+
+    if(length(num_reps) == 1){
+        fold_changes = matrix(rep(1, length(transcripts)))
+    } else if(length(num_reps) == 2) {
+        # This means fold_changes is a numeric vector, per the check function
+        if(length(reads_per_transcript) == 1) {
+            basemeans = matrix(reads_per_transcript, ncol=2, nrow=length(transcripts))
+            basemeans[,2] = fold_changes * basemeans[,1]
+        } else if(length(reads_per_transcript) == length(transcripts)){
+            basemeans = matrix(c(reads_per_transcript, reads_per_transcript), nrow=length(reads_per_transcript))
+            basemeans = basemeans*fold_changes
+        } else {
+            stop('reads_per_transcript is the wrong length.')
+        }
+    } else {
+        basemeans = reads_per_transcript * fold_changes
+    }
+
+    if(is.null(size)){
+        size = basemeans / 3
+    }else if(class(size) == 'numeric'){
+        if(is.matrix(basemeans)){
+            num_rows = nrow(basemeans)
+            num_cols = ncol(basemeans)
+        } else {
+            num_rows = length(basemeans)
+            num_cols = 1
+        }
+        size = matrix(size, nrow=num_rows, ncol=num_cols)
+    }else if(class(size) == 'matrix'){
+        if(!is.matrix(basemeans)){
+            stop('If you provide a matrix for size, you also need a matrix for reads_per_transcript.')
+        }
+        stopifnot(nrow(size) == nrow(basemeans))
+        stopifnot(ncol(size) == ncol(basemeans))
+    }else{
+        stop('size must be a number, numeric vector, or matrix.')
+    }
+
+    # create matrix of transcripts & number of reads to simulate
+    if('seed' %in% names(extras)){
+        set.seed(extras$seed)
+    }
+    group_ids = rep(1:length(num_reps), times=num_reps)
+    numreadsList = vector("list", sum(num_reps))
+    numreadsList = lapply(1:sum(num_reps), function(i){
+        group_id = group_ids[i]
+        NB(as.matrix(basemeans)[,group_id], as.matrix(size)[,group_id])
+    })
+    readmat = matrix(unlist(numreadsList), ncol=sum(num_reps))
+    readmat = t(extras$lib_sizes * t(readmat))
+    if('gcbias' %in% names(extras)){
+        stopifnot(length(extras$gcbias) == sum(num_reps))
+        gcclasses = unique(sapply(extras$gcbias, class))
+        if(sum(gcclasses %in% c('numeric', 'loess')) < length(extras$gcbias)){
+            stop(.makepretty('gc bias parameters must be integers 0 through 7
+                or loess objects'))
+        }
+        if(any(extras$gcbias!=0)){
+            readmat = add_gc_bias(readmat, extras$gcbias, transcripts)
+        }
+    }
+
+    # prep output directory
+    sysoutdir = gsub(' ', '\\\\ ', outdir)
+    if(.Platform$OS.type == 'windows'){
+        shell(paste('mkdir', sysoutdir))
+    }else{
+        system(paste('mkdir -p', sysoutdir))
+    }
+
+    # do the actual sequencing
+    sgseq(readmat, transcripts, paired, outdir, extras, reportCoverage)
+
+    # write out simulation information, if asked for:
+    if(!('write_info' %in% names(extras))){
+        write_info=TRUE
+    }
+
+    if(write_info){
+      # save the *unbiased* counts matrix: the counts for each
+      # transcript and each sample *before* fragment GC bias is applied
+      counts_matrix <- readmat
+      .write_info(extras, transcripts, num_reps, fold_changes, outdir,
+                  group_ids, counts_matrix)
+    }
+}
+
+
+.check_extras = function(extras, paired, total.n){
+  
+  if(!('distr' %in% names(extras))){
+    extras$distr = 'normal'
+  }else{
+    extras$distr = match.arg(extras$distr, 
+                             c('normal', 'empirical', 'custom'))
+    if(extras$distr == 'custom' & !('custdens' %in% names(extras))){
+      stop(.makepretty('to use custom fragment distribution, provide
+                       "custdens", a logspline object representing the distribution.'))
+    }
+    }
+  
+  # I don't love this--fraglen and fragsd aren't needed unless distr is normal.
+  # but we store them anyway. should code better?
+  if (!('fraglen' %in% names(extras))) {
+    extras$fraglen = rep(250, total.n)
+  } else {
+    if (length(extras$fraglen) == 1) {
+      extras$fraglen = rep(extras$fraglen, total.n)
+    } else {
+      stopifnot(length(extras$fraglen) == total.n)
+    }
+  }
+  if (!('fragsd' %in% names(extras))) {
+    extras$fragsd = rep(25, total.n)
+  } else {
+    if (length(extras$fragsd) == 1) {
+      extras$fragsd = rep(extras$fragsd, total.n)
+    } else {
+      stopifnot(length(extras$fragsd) == total.n)
+    }
+  }
+  
+  if(!('readlen' %in% names(extras))){
+    extras$readlen = 100
+  }
+  
+  if(!('bias' %in% names(extras))){
+    extras$bias = 'none'
+  }else{
+    extras$bias = match.arg(extras$bias, c('none', 'rnaf', 'cdnaf'))
+  }
+  
+  if(!('error_model' %in% names(extras))){
+    extras$error_model = 'uniform'
+  }
+  .check_error_model(extras, paired)
+  
+  if(!('error_rate' %in% names(extras))){
+    extras$error_rate = 0.005
+  }
+  if(extras$error_model == 'custom'){
+    extras$path = paste0(extras$model_path, '/', extras$model_prefix)
+  }#this should work beause we already checked stuff.
+  
+  if(!('bias' %in% names(extras))){
+    extras$bias = 'none'
+  }else{
+    extras$bias = match.arg(extras$bias, c('none', 'rnaf', 'cdnaf'))
+  }
+  
+  if(!('lib_sizes' %in% names(extras))){
+    extras$lib_sizes = rep(1, total.n)
+  }else{
+    stopifnot(is.numeric(extras$lib_sizes))
+    stopifnot(length(extras$lib_sizes) == total.n)
+  }
+  
+  if (!('frag_GC_bias' %in% names(extras))) {
+    extras$frag_GC_bias <- 'none'
+  } else {
+    stopifnot(is.matrix(extras$frag_GC_bias))
+    stopifnot(nrow(extras$frag_GC_bias) == 101)
+    stopifnot(ncol(extras$frag_GC_bias) == total.n)
+    stopifnot(all(extras$frag_GC_bias >= 0 & extras$frag_GC_bias <= 1))
+  }
+  
+  if (!('strand_specific' %in% names(extras))) {
+    extras$strand_specific <- FALSE
+  }
+  
+  return(extras)
+  
+}
+
+#### ***** THE FOLLOWING FUNCTION WAS ALTERED. *****
+sgseq = function(readmat, transcripts, paired, outdir, extras, reportCoverage=FALSE){
+  #report theoretically perfect coverage if reportCoverage=TRUE, will write a file
+  if(reportCoverage==TRUE){
+    templates = unique(transcripts)
+    coverage_matrices = list()
+    for(i in 1:length(templates)){coverage_matrices = c(coverage_matrices, list(matrix(0, ncol=dim(readmat)[2], width(templates)[i])))}
+    names(coverage_matrices) = names(templates)
+  }
+  
+  for(i in seq_len(ncol(readmat))) {
+    ##$ begin small chunk regarding fragment GC bias or not
+    ### end 
+    tObj = rep(transcripts, times=readmat[,i])
+    iterations = ceiling(length(tObj) / 1e6L)
+    offset = 1L
+    for(iteration in seq_len(iterations)) {
+      tSubset = tObj[offset:min(offset+999999L, length(tObj))] ## corrected value of integer added to offset to avoid duplicating reads
+      tFrags = generate_fragments(tSubset, extras$fraglen[i], extras$fragsd[i],
+                                  extras$readlen, extras$distr, extras$custdens,
+                                  extras$bias)
+      
+      if (!extras$strand_specific) {
+        #reverse_complement some of those fragments
+        tFrags = reverse_complement(tFrags)
+      }
+      
+      #get reads from fragments
+      reads = get_reads(tFrags, extras$readlen, paired)
+      
+      if(reportCoverage==TRUE){
+        read_info = unique(names(reads))
+        read_info_split = strsplit(read_info, ";mate1:|;mate2:")
+        read_info_matrix = matrix(unlist(read_info_split), ncol=3, byrow=T)
+        for(j in 1:dim(read_info_matrix)[1]){
+          read = read_info_matrix[j,]
+          target = which(names(coverage_matrices)==read[1])
+          # ML: changing these to strsplit (str_split requires stringr depends or imports)
+          coords1 = unlist(strsplit(read[2], "-"))
+          coords2 = unlist(strsplit(read[3], "-"))
+          coverage_matrices[[target]][coords1[1]:coords1[2],i]=coverage_matrices[[target]][coords1[1]:coords1[2],i]+1
+          coverage_matrices[[target]][coords2[1]:coords2[2],i]=coverage_matrices[[target]][coords2[1]:coords2[2],i]+1
+          save(coverage_matrices, file=file.path(outdir, 'sample_coverages.rda') )
+        }
+      }
+      
+      #add sequencing error
+      if(extras$error_model == 'uniform'){
+        errReads = add_error(reads, extras$error_rate)
+      }else if(extras$error_model == 'custom'){
+        errReads = add_platform_error(reads, 'custom', paired, extras$path)
+      }else{
+        errReads = add_platform_error(reads, extras$error_model, paired)
+      }
+      
+      #write read pairs
+      # ***** FOLLOWING ALTERATIONS HAVE BEEN MADE *****
+      # ***** IN added gzip option as it was missing without default *****
+      # ***** Removed offset argument setting *****
+      
+      # Original command:
+      #  write_reads(errReads, readlen=extras$readlen,
+      #    fname=paste0(outdir, '/sample_', sprintf('%02d', i)), paired=paired,
+      #     gzip=extras$gzip, offset=offset)
+      write_reads(errReads, readlen=extras$readlen,
+                  fname=paste0(outdir, '/sample_', sprintf('%02d', i)), paired=paired, gzip=FALSE)
+      offset = offset + 1e6L
+    }
+  }
+  
+}
+
+
+```
+### END OF *polyester* CODE
+
+## Gene selection
+
+The simulation creates reads for a selection of 1000 Mycobacterium tuberculosis genes. 
+
+As a first step, the original annotation file from Mtb is edited, keeping only genes where artificial UTRs can be added without overlapping other genes.  
+
+```{r creating gene selection}
+# Loaded genome annotation file. Only genes were selected.
+gff <- read.delim("data/Mycobacterium_tuberculosis_h37rv.ASM19595v2.40.gtf", header = FALSE, comment.char = "#")
+genes <- gff[gff[,3]=="gene",]
+# Separated non-coding RNAs from coding genes
+known_sRNAs <- genes[grepl("ncRNA", genes[,9], ignore.case = TRUE)==TRUE,]
+good_sRNA <- known_sRNAs[!grepl(".*; gene_name (mcr5|mcr19|mpr6|mcr15|mcr7|ASpks);.*", known_sRNAs[,9]),]
+coding_genes <- genes[grepl("ncRNA", genes[,9], ignore.case = TRUE)==FALSE,]
+
+genes_plus <- genes[genes[,7]=="+",]
+genes_pl_range <- IRanges(start = genes_plus[,4], end = genes_plus[,5])
+genes_minus <- genes[genes[,7]=="-",]
+genes_minus_range <- IRanges(start = genes_minus[,4], end = genes_minus[,5])
+
+# Selected only genes that are more than 160 bp apart to accomodate artificial UTRs
+gene_end <-3280
+suitable_genes <- coding_genes[2,]
+for (i in 3:nrow(coding_genes)) {
+  if (coding_genes[i,4]-gene_end>160) {
+    suitable_genes <- rbind(suitable_genes, coding_genes[i,])
+  }
+  gene_end <- coding_genes[i,5]
+}
+
+# Eliminate genes that proved to be problematic.
+suitable_genes <- suitable_genes[!grepl("gene_id (Rv0978c|Rv2197c);*", suitable_genes[,9]),]
+
+# Split suitable genes by strand
+suitable_genes_plus <- suitable_genes[suitable_genes[,7]=="+",]
+suitable_genes_minus <- suitable_genes[suitable_genes[,7]=="-",]
+```
+
+## Addition of artificial UTRs
+Once two strand-specific sets of genes were prepared, the UTRs could be added. 
+UTRs were of four different types: 50 genes had their genomic coordinates extended on the 5’ end, 50 genes had them extended on the 3’ end, 50 genes had 5’ UTRs added as separate fragments and 50 genes had similarly appended 3’ UTRs. All mimicked UTRs were 100 nt long. 
+
+``` {r UTR preparation}
+# Created a selection of 100 genes with their genomic coordinated extended on the 5’ end. Used only genes on plus strand.
+five_pr_merged_plus <- suitable_genes_plus[1:100,]
+five_prime_merged_plus <- data.frame(five_pr_merged_plus[,1], five_pr_merged_plus[,2], five_pr_merged_plus[,3], five_pr_merged_plus[,4]-100, five_pr_merged_plus[,5], five_pr_merged_plus[,6], five_pr_merged_plus[,7], five_pr_merged_plus[,8], five_pr_merged_plus[,9])
+
+# Out of 100, selected 50 genes with UTRs that did not overlap any other gene.
+five_prime_merged_plus <- five_prime_merged_plus[which(countOverlaps(IRanges(start = five_prime_merged_plus[,4], end = five_prime_merged_plus[,5]), genes_pl_range)==1)[1:50],]
+# This and all subsequent UTRs were checked by examining UTR length when disjoined from any overlapping genes
+check <- disjoin(c(IRanges(start = five_prime_merged_plus[,4], end = five_prime_merged_plus[,5]), genes_pl_range))
+UTRs <- check[! check %in% subsetByOverlaps(check, genes_pl_range)]
+
+# Similarly, prepared 50 genes with 5’ UTRs added as separate fragments. Used genes on minus strand.
+five_pr_sep_minus <- suitable_genes_minus[c(1:100,250:295),]
+five_prime_sep_minus <- data.frame(five_pr_sep_minus[,1], five_pr_sep_minus[,2], five_pr_sep_minus[,3], five_pr_sep_minus[,5]+1, five_pr_sep_minus[,5]+100, five_pr_sep_minus[,6], five_pr_sep_minus[,7], five_pr_sep_minus[,8], five_pr_sep_minus[,9])
+five_prime_sep_minus <- five_prime_sep_minus[which(countOverlaps(IRanges(start = five_prime_sep_minus[,4], end = five_prime_sep_minus[,5]), genes_minus_range)==0)[1:50],]
+
+
+
+# Prepared 50 genes extended on the 3’ end. Used plus strand genes (different from the ones used for 5' UTRs)
+three_pr_merged_plus <- suitable_genes_plus[301:400,]
+three_prime_merged_plus <- data.frame(three_pr_merged_plus[,1], three_pr_merged_plus[,2], three_pr_merged_plus[,3], three_pr_merged_plus[,4], three_pr_merged_plus[,5]+100, three_pr_merged_plus[,6], three_pr_merged_plus[,7], three_pr_merged_plus[,8], three_pr_merged_plus[,9])
+three_prime_merged_plus <- three_prime_merged_plus[which(countOverlaps(IRanges(start = three_prime_merged_plus[,4], end = three_prime_merged_plus[,5]), genes_pl_range)==1)[1:50],]
+
+
+# Prepared 50  genes with 3’ UTRs added as separate fragments. Used genes on minus strand.
+three_pr_sep_minus <- suitable_genes_minus[103:202,]
+three_prime_sep_minus <- data.frame(three_pr_sep_minus[,1], three_pr_sep_minus[,2], three_pr_sep_minus[,3], three_pr_sep_minus[,4]-100, three_pr_sep_minus[,4]-1, three_pr_sep_minus[,6], three_pr_sep_minus[,7], three_pr_sep_minus[,8], three_pr_sep_minus[,9])
+three_prime_sep_minus <- three_prime_sep_minus[which(countOverlaps(IRanges(start = three_prime_sep_minus[,4], end = three_prime_sep_minus[,5]), genes_minus_range)==0)[1:50],]
+
+
+
+col_names <- c("name","source", "type", "start", "end", "inf1", "strand", "inf2", "gene_inf")
+colnames(five_prime_merged_plus) <- col_names
+colnames(three_prime_merged_plus) <- col_names
+colnames(five_pr_sep_minus) <- col_names
+colnames(five_prime_sep_minus) <- col_names
+colnames(three_pr_sep_minus) <- col_names
+colnames(three_prime_sep_minus) <- col_names
+colnames(good_sRNA) <- col_names
+
+
+extra_genes <- coding_genes[! coding_genes[,4] %in% suitable_genes[,4],]
+colnames(extra_genes) <- col_names
+# Joined all altered features together
+fin_subset <- rbind(five_prime_merged_plus,three_prime_merged_plus,five_prime_sep_minus,five_pr_sep_minus, three_prime_sep_minus,three_pr_sep_minus, good_sRNA)
+#added more genes to have 1000 in total.
+fin_subset <- rbind(fin_subset, extra_genes[1:(1000-nrow(fin_subset)),])
+# Created a new annotation for the gene selection.
+write.table(fin_subset, "output/simulations/MTB_gene_subset_good_sRNA.gtf", sep = "\t", quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+```
+
+## Preparation of FASTA file with target sequences
+Now that the feature selection is prepared, a FASTA file with the target sequences can be created.
+
+```{r fasta}
+#Split the subset by strand.
+fin_subset_plus <- fin_subset[fin_subset$strand=="+",]
+fin_subset_minus <- fin_subset[fin_subset$strand=="-",]
+
+# Read in the sequence of the entire chromosome.
+chr_fasta <- readDNAStringSet("data/Mycobacterium_tuberculosis_h37rv.ASM19595v2.dna.chromosome.Chromosome.fa")
+sequence <- paste(chr_fasta[1])
+
+# Extract the sequences for each feature on the plus strand and add corresponding headers.
+subset_seq_plus <- apply(fin_subset_plus, 1, function(x) substr(sequence, x[4], x[5]))
+seq_headers_plus <- apply(fin_subset_plus, 1, function(x) paste(">AL123456.3_gene_p", "[", x[9], "]"))
+fin_vector_plus <- c()
+for (i in 1:length(seq_headers_plus)) {
+     fin_vector_plus <- c(fin_vector_plus, seq_headers_plus[i], subset_seq_plus[i])
+}
+
+# Extract the sequences for each feature on the minus strand, calculate reverse complement and add corresponding headers.
+subset_seq_minus <- apply(fin_subset_minus, 1, function(x) substr(sequence, x[4], x[5]))
+seq_headers_minus <- apply(fin_subset_minus, 1, function(x) paste(">AL123456.3_gene_m", "[", x[9], "]"))
+subset_seq_minus_rev_compl <- sapply(subset_seq_minus, function(x) as.character(reverseComplement(DNAString(x))))
+fin_vector_minus <- c()
+
+for (i in 1:length(seq_headers_minus)) {
+     fin_vector_minus <- c(fin_vector_minus, seq_headers_minus[i], subset_seq_minus_rev_compl[i])
+}
+#Join all features together and write them into a file
+fin_vector <- c(fin_vector_plus, fin_vector_minus)
+writeLines(fin_vector, "output/simulations/MTB_gene_subset_selected_sRNA.fa")
+```
+
+## Simulation setup
+Once the FASTA file is ready, it can be used for simulations. Long transcripts usually yield more reads in RNA-seq experiments than short ones, so we specify reads_per_transcript as a function of transcript length (20x coverage).
+
+In addition, two different fold changes were used in the simulation.
+
+```{r simulation prep}
+fasta = readDNAStringSet("output/simulations/MTB_gene_subset_selected_sRNA.fa")
+readspertx <- round(20 * width(fasta) / 100)
+
+# Realistic fold change (20% genes differentially expressed)
+# As there are 1000 transcipts, 200 are DE and there are 40 in each fold change category (1-5)
+fold_changes.20 <- matrix(c(rep(c(rep(1,5), 2,3,4,5,6,rep(1, 10), rep(2, 10), rep(3, 10), rep(4, 10)), 4), 1,1,1,2,4, rep(1, 5), rep(2, 5), rep(3, 5), rep(4,5), 1,1,3,5,6,rep(1,75), rep(2,15), rep(3,15), rep(4, 15), rep(5,15), rep(6, 15), rep(1, 155), rep(2, 155), rep(3, 155), rep(4, 155)))
+fold_changes.20 <- cbind(fold_changes.20, c(rep(c(2,3,4,5,6,rep(1,5), rep(1, 10), rep(2, 10), rep(3, 10), rep(4, 10)), 4), 2,4,5,1,1, rep(1, 5), rep(2, 5), rep(3, 5), rep(4,5), 3,6,1,1,1, rep(2,15), rep(3,15), rep(4, 15), rep(5,15), rep(6, 15), rep(1,75), rep(1, 155), rep(2, 155), rep(3, 155), rep(4, 155)))
+
+# 80% genes differentially expressed
+fold_changes.80 <- matrix(c(rep(rep(c(rep(1,5), rep(2,5), rep(3,5), rep(4,5), rep(5,5)), 5),8), rep(c(rep(1,25), rep(2, 25), rep(3,25), rep(4,25), rep(5,25)),8)), nrow = 1000)
+
+```
+
+## Simulations
+The example below produces data for 10 paired-end stranded samples. The files then have to be mapped to the Mtb genome using Rsubread.
+
+```{r simulation paired-end example}
+simulate_experiment("output/simulations/MTB_gene_subset_selected_sRNA.fa", reads_per_transcript=readspertx, num_reps=c(5,5), fold_changes=fold_changes.20, outdir='output/simulations/paired_realistic_selected_sRNA_UTR/fc.20', paired = TRUE, strand_specific = TRUE, seed=42)
+
+```
+
+## Session Information
+``` {r session_info}
+sessionInfo()
+```

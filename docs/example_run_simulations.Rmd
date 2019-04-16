@@ -1,0 +1,373 @@
+---
+title: "Example run of baerhunter on simulated RNA-seq data (using multiple cut-offs)"
+author: "Irilenia Nobeli"
+date: "2019/04/16"
+output: html_document
+
+---
+
+This markdown script is an example of how to run *baerhunter*; this is an R package that allows the user to build a list of putative non-coding RNAs from stranded RNA-seq data and add them to an existing genome annotation so that downstream analysis can be carried out on both coding and (putative) non-coding transcripts found in intergenic regions. 
+
+In this example walkthrough, we reproduce the simulated data analysis presented in the *baerhunter* paper. The simulated reads were produced using the R package *polyester*. There is a separate R markdown document that reproduces the results of the analysis of real RNA-seq data from the Cortes et al. dataset (E-MTAB-1616).
+
+Reference
+A. Ozuna, D. Liberto, R. M. Joyce, K.B. Arnvig, I. Nobeli. baerhunter: An R package for the discovery and analysis of expressed non-coding regions in bacterial RNA-seq data.
+
+
+```{r "knitr config", cache = FALSE, include=FALSE}
+require("knitr")
+opts_chunk$set(echo = TRUE)
+#set the root directory to the project directory so all paths
+#that follow will be relative to that.
+opts_knit$set(root.dir = "../")
+```
+
+```{r setup, include=FALSE}
+library("Rsubread")
+library("Rsamtools")
+library("rtracklayer")
+library("ggplot2")
+
+# install and load the baerhunter package
+library("devtools")
+install_github("irilenia/baerhunter")
+library("baerhunter")
+
+```
+
+## Quick summary of baerhunter
+A typical *baerhunter* run will involve the following steps:
+
+* Map reads to the genome
+* Re-annotate the feature files to include expressed intergenic features and UTRs
+* Count reads against new annotation
+* Carry out downstream analysis (here differential expression analysis of both coding genes and non-coding RNAs)
+
+### Important - required directory setup
+This script assumes a certain directory structure and it also assumes the existence of a number of files. There are two ways of achieving this:
+
+* If you have successfully run the simulations that create the RNA-seq data, you
+already have the required fasta files and directories in place. 
+* If you choose not to re-run the simulations, you need to download the data instead (not available on GitHub due to its size). Read carefully the README file in this repository to find out how to do this.
+* Whether you run the simulations or not, you will need in addition the output from Rockhopper to run the script to completion. Again, instructions for getting this output are included in the README file of this repository.
+
+
+## Mapping reads to the genome
+Simulated reads are mapped to the genome using Rsubread's align() function. Any mapper that maps short reads to a reference genome can be used instead.
+If everything works, you should end up with 10 bam files in the `output/simulations/paired_realistic_selected_sRNA_UTR/fc.20`
+directory.
+
+```{r map_reads_to_genome}
+fasta_first <- list.files(path="./output/simulations/paired_realistic_selected_sRNA_UTR/fc.20", pattern = "_1.fasta$", full.names = TRUE)
+fasta_second <- list.files(path="./output/simulations/paired_realistic_selected_sRNA_UTR/fc.20", pattern = "_2.fasta$", full.names = TRUE)
+
+buildindex(basename="output/simulations/mtb_gen", reference="data/Mycobacterium_tuberculosis_h37rv.ASM19595v2.dna.chromosome.Chromosome.fa")
+
+align.stat <- align(index="output/simulations/mtb_gen",readfile1=fasta_first, readfile2 = fasta_second)
+
+## Sort Bam files
+sorted_bam <-
+  c(
+    "sample_01",
+    "sample_02",
+    "sample_03",
+    "sample_04",
+    "sample_05",
+    "sample_06",
+    "sample_07",
+    "sample_08",
+    "sample_09",
+    "sample_10"
+  )
+bam_files <-
+  list.files(path="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20", pattern = ".BAM$",
+             full.names = TRUE,
+             ignore.case = TRUE)
+for (i in 1:10) {
+  sortBam(bam_files[i], sorted_bam[i])
+}
+       
+  
+#tidy up
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/unsorted_bams/")
+system("/bin/mv output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/*.BAM output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/*.BAM.indel.vcf output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/unsorted_bams/")
+for (i in 1:10) {
+  bamfile<- paste0(sorted_bam[i], ".bam")
+  system(paste0("/bin/mv ", bamfile, " output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/"))
+}
+  
+
+
+
+```
+
+
+## Updating the genome annotation using the RNA-seq signal
+We start by calling baerhunter's *feature_file_editor()* function to predict intergenic elements (sRNAs and UTRs) based on the RNA-seq signal and existing annotation (available as a gff3 file).
+
+
+```{r update_the_genome_annotation}
+# Call baerhunter's feature_file_editor()
+feature_file_editor(bam_directory="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20",  
+                    original_annotation_file="Mycobacterium_tuberculosis_h37rv.ASM19595v2.40.chromosome.Chromosome.gff3",
+                    annot_file_dir = "./data/",
+                    output_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3", "ncRNA", 
+                    low_coverage_cutoff=5, 
+                    high_coverage_cutoff=10, 
+                    min_sRNA_length=40, 
+                    min_UTR_length=50, 
+                    paired_end_data=TRUE, 
+                    strandedness="stranded")
+
+
+# Similar gff3 files can be created for different values of the cut-off parameters...
+# REPEAT for all other cut-offs
+feature_file_editor(bam_directory="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20",  
+                    original_annotation_file="Mycobacterium_tuberculosis_h37rv.ASM19595v2.40.chromosome.Chromosome.gff3",
+                    annot_file_dir = "./data/",
+                    output_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_20.gff3", "ncRNA", 
+                    low_coverage_cutoff=5, 
+                    high_coverage_cutoff=20, 
+                    min_sRNA_length=40, 
+                    min_UTR_length=50, 
+                    paired_end_data=TRUE, 
+                    strandedness="stranded")
+
+feature_file_editor(bam_directory="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20",  
+                    original_annotation_file="Mycobacterium_tuberculosis_h37rv.ASM19595v2.40.chromosome.Chromosome.gff3",
+                    annot_file_dir = "./data/",
+                    output_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_10.gff3", "ncRNA", 
+                    low_coverage_cutoff=2, 
+                    high_coverage_cutoff=10, 
+                    min_sRNA_length=40, 
+                    min_UTR_length=50, 
+                    paired_end_data=TRUE, 
+                    strandedness="stranded")
+
+feature_file_editor(bam_directory="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20",  
+                    original_annotation_file="Mycobacterium_tuberculosis_h37rv.ASM19595v2.40.chromosome.Chromosome.gff3",
+                    annot_file_dir = "./data/",
+                    output_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_20.gff3", "ncRNA", 
+                    low_coverage_cutoff=2, 
+                    high_coverage_cutoff=20, 
+                    min_sRNA_length=40, 
+                    min_UTR_length=50, 
+                    paired_end_data=TRUE, 
+                    strandedness="stranded")
+
+```
+
+## Counting reads against the new annotation produced by baerhunter
+Once new putative ncRNA features are added to the genome annotation, we use the *count_features()* function to count reads against both the original and newly annotated features.
+
+```{r count_reads_against_features}
+# Call count_features() function
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10")
+count_features(bam_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/",
+               annotation_dir= "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/", 
+               output_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/",
+               annotation_file = "mtb_5_10.gff3", 
+               chromosome_alias_file = "data/chromosome.txt" , 
+               target_features = c("gene", "ncRNA_gene", "putative_sRNA", "putative_UTR"), 
+               strandedness = "stranded", 
+               is_paired_end= TRUE)
+
+# REPEAT for all cut-offs
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_20")
+count_features(bam_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/",
+               annotation_dir= "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/", 
+               output_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_20/",
+               annotation_file = "mtb_5_20.gff3", 
+               chromosome_alias_file = "data/chromosome.txt" , 
+               target_features = c("gene", "ncRNA_gene", "putative_sRNA", "putative_UTR"), 
+               strandedness = "stranded", 
+               is_paired_end= TRUE)
+
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_10")
+count_features(bam_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/",
+               annotation_dir= "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/", 
+               output_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_10/",
+               annotation_file = "mtb_2_10.gff3", 
+               chromosome_alias_file = "data/chromosome.txt" , 
+               target_features = c("gene", "ncRNA_gene", "putative_sRNA", "putative_UTR"), 
+               strandedness = "stranded", 
+               is_paired_end= TRUE)
+
+system("mkdir output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_20")
+count_features(bam_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/",
+               annotation_dir= "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/", 
+               output_dir = "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_20/",
+               annotation_file = "mtb_2_20.gff3", 
+               chromosome_alias_file = "data/chromosome.txt" , 
+               target_features = c("gene", "ncRNA_gene", "putative_sRNA", "putative_UTR"), 
+               strandedness = "stranded", 
+               is_paired_end= TRUE)
+
+
+```
+
+## Filtering predictions by level of expression
+Occasionally, it is preferred to filter out low-expressed transcripts, both because of noise in the RNA-seq data and because features with low expression are unlikely to be useful for further downstream analysis. The *tpm_flag_filtering()* function is used here to keep only putative ncRNAs with higher expression. 
+
+To filter transcripts by expression, we calculate first TPM (transcripts per million) values for each feature of interest using the *tpm_normalisation()* function, then add expression level flags to the annotation file and finally filter out transcripts with flags corresponding to lower expression values.
+
+Here, we have simulated data and it's less important to filter by expression, since we can always adjust the expression levels in the simulation ourselves to avoid low-level transcripts. We demonstrate how the filtering is done but do not use the filtered results further.
+
+```{r filtering_by_expression}
+# Filter out low expression putative sRNAs
+# calculate TPM values
+tpm.df <- tpm_normalisation("output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_sRNA_Counts.csv", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3", "putative_sRNA", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_sRNA_TPM.csv")
+
+#repeat for putative UTRs
+tpm.df <- tpm_normalisation("output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_UTR_Counts.csv", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3", "putative_UTR", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_UTR_TPM.csv")
+
+#produce single TPM file
+system("( cat output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_sRNA_TPM.csv  ; tail -n +2 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_UTR_TPM.csv ; ) | cat > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_ncRNA_TPM.csv")
+
+# flag features according to their TPM values
+tpm_flagging("output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_ncRNA_TPM.csv", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3", "output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/flagged_mtb_5_10.gff3")
+
+# filter features according to their flags
+tpm_flag_filtering("output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/flagged_mtb_5_10.gff3", 
+                    target_flag="high_expression_hit", 
+                    target_features=c("putative_sRNA", "putative_UTR"), 
+                    output_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/filtered_high_expression_sRNA_mtb_5_10.gff3")
+
+
+# The same process can be repeated for all other cut-offs...
+
+```
+
+## Overlap of predicted and known ncRNAs
+In the case of simulated data we already know what ncRNAs should be discovered in the data so that we can find out what the overlap is between our predictions and the ground truth.
+
+```{r comparison_to_original_annotation}
+# We will repeat this process several times so worth packaging in a function
+compare_simulated_with_predicted <- function(annotation_file) {
+# First, we compare the putative_sRNA returned by baerhunter to the original ncRNA genes
+# annotated in the gff3 file. There are 24 ncRNAs that should be recovered as six of the original
+# ones were not included in the simulation because they overlapped gene features and hence they would
+# have been treated as UTRs.
+
+  annot <- import.gff3(annotation_file)
+
+  #create subsets of the putative sRNAs and UTRs first
+  pred.sRNA <- subset(annot, type == "putative_sRNA")
+  pred.UTR <- subset(annot, type == "putative_UTR")
+  pred.UTR.p <- subset(annot, (type == "putative_UTR") & (strand == "+"))
+  pred.UTR.m <- subset(annot, (type == "putative_UTR") & (strand == "-"))
+
+  ncRNA <- subset(annot, type == "ncRNA_gene")   # these are the original ncRNAs in the Mtb annotation
+
+  num.pred.sRNA.plus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "+")) ) ) 
+  num.pred.sRNA.minus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "-")) ) ) 
+  num.pred.UTRs.plus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "+")) ) ) 
+  num.pred.UTRs.minus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "-")) ) ) 
+
+  #find the overlap between predicted and original ncRNA
+  sRNA.hits <- findOverlaps(ncRNA, pred.sRNA, type="any", minoverlap=1L,   ignore.strand=FALSE)
+  #find EXACT matches
+  sRNA.pairs.equal <- findOverlapPairs(ncRNA, pred.sRNA, type="equal", ignore.strand=FALSE)
+  sRNA.pairs <- findOverlapPairs(ncRNA, pred.sRNA, type="any", ignore.strand=FALSE)
+  length(sRNA.pairs)
+  #the following ncRNAs were not simulated (and this is why they are not predicted): mcr5|mcr19|mpr6|mcr15|mcr7|ASpks
+  ncRNA[ncRNA %outside% pred.sRNA,"Name"]
+
+  # Next, we look at predicted UTRs
+  #check how many are predicted and their lengths
+  length(pred.UTR)
+  width(pred.UTR)
+  table(width(pred.UTR) == 100)
+  
+  res <- list(annot=annotation_file, sRNApairs= sRNA.pairs, sRNApairs.equal=sRNA.pairs.equal, predUTRs = pred.UTR)
+  return(res)
+}
+
+
+# ****** CHECK BAERHUNTER RESULTS******* #
+# Run checking with various cut-offs
+res_2_10 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_10.gff3")
+length(res_2_10$sRNApairs)
+table(width(res_2_10$predUTRs) == 100)
+table(width(res_2_10$predUTRs) < 80)
+
+res_5_10 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3")
+length(res_5_10$sRNApairs)
+length(res_5_10$sRNApairs.equal)
+table(width(res_5_10$predUTRs) == 100)
+table(width(res_5_10$predUTRs) < 80)
+
+res_2_20 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_2_20.gff3")  
+length(res_2_20$sRNApairs)
+table(width(res_2_20$predUTRs) == 100)
+table(width(res_2_20$predUTRs) < 80)
+
+res_5_20 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_20.gff3")  
+length(res_5_20$sRNApairs)
+table(width(res_5_20$predUTRs) == 100)
+table(width(res_5_20$predUTRs) < 80)
+
+
+# *** CHECK ROCKHOPPER RESULTS *** #
+# NOTE: The gff3 file must contain also the original ncRNA annotation for the comparison
+# to be carried out successfully. The gff3 file translated from the transcripts.txt file
+# of Rockhopper does not contain these ncRNAs but we can add them using the gff3 file we
+# produced for baerhunter. 
+
+
+system("grep ncRNA output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/ncRNA.gff3")
+system("cat output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/NC_999999.gff3 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/ncRNA.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/tempor.gff3")
+system("sort -n -k 4 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/tempor.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/NC_999999_edited.gff3")
+system("/bin/rm output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/tempor.gff3 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/ncRNA.gff3")
+
+rh_05_40 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.5_40_output/NC_999999_edited.gff3")
+length(rh_05_40$sRNApairs)
+length(rh_05_40$sRNApairs.equal)
+table(width(rh_05_40$predUTRs) == 100)
+table(width(rh_05_40$predUTRs) < 80)
+
+
+system("grep ncRNA output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/ncRNA.gff3")
+system("cat output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/NC_999999.gff3 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/ncRNA.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/tempor.gff3")
+system("sort -n -k 4 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/tempor.gff3 > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/NC_999999_edited.gff3")
+system("/bin/rm output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/tempor.gff3 output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/ncRNA.gff3")
+
+rh_02_40 <- compare_simulated_with_predicted(annotation_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/rockhopper_fastq_0.2_40_output/NC_999999_edited.gff3")
+length(rh_02_40$sRNApairs)
+length(rh_02_40$sRNApairs.equal)
+table(width(rh_02_40$predUTRs) == 100)
+table(width(rh_02_40$predUTRs) < 80)
+
+#NOTE: The original GFF3 file has at least one case where two CDS on the same strand overlap. Rockhopper considers overlapping CDS on the same strand and assigns reads of the longer CDS as UTRs to the shorter. This is why one of the predictions is very long at >740 nucleotides (feature: 223910-224652 predicted to be the UTR of Rv0192A). Baerhunter on the other hand will only consider intergenic rergions after the union of such CDS, so reads of the longer CDS will not be assigned to the shorter one.
+
+op <- par(mar = c(6,4,4,2) + 0.1)
+boxplot(width(res_5_20$predUTRs), width(res_5_10$predUTRs), width(res_2_20$predUTRs), width(res_2_10$predUTRs),width(rh_02_40$predUTRs), width(rh_05_40$predUTRs), ylim=c(0,110), ylab="UTR length", names=c("bh_5-20", "bh_5-10", "bh_2-20", "bh_2-10", "rh_0.2-40", "rh_0.5-40"), las=2)
+par(op)
+
+```
+
+## Example of downstream analysis - differential gene expression with DESeq2
+In this example, we create a counts file that contains counts for both coding genes and ncRNA elements and use DESeq2 to identify differentially expressed features. We separate the UTRs from the CDS regions, as it is not uncommon to see differential expression in the UTR without much signal covering the CDS region.
+
+
+```{r differential_expression}
+#put all counts together
+system("cat output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/gene_Counts.csv > output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/allCounts.csv")
+system("tail -n +2  output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_UTR_Counts.csv  >> output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/allCounts.csv")
+system("tail -n +2  output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/putative_sRNA_Counts.csv  >> output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/allCounts.csv")
+
+
+#Call differential_expression() function
+de.res <- differential_expression(feature_count_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/allCounts.csv", metadata_file="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/conditions.txt", cutoff_value=10, multiple_variables=FALSE, main_condition="condition", output_file_name="output/simulations/paired_realistic_selected_sRNA_UTR/fc.20/mtb_5_10/allCounts_diff_expression.csv")
+
+summary(de.res)
+resOrdered <- de.res[order(de.res$pvalue),]
+resOrdered[1:10,]
+resOrdered[grep('putative', rownames(resOrdered)),]
+
+```
+
+```{r session information}
+sessionInfo()
+
+```
