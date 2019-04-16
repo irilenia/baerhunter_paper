@@ -3,6 +3,9 @@
 ## Introduction
 Baerhunter is an R package for identifying and quantifying intergenic non-coding (small RNA and UTR) elements in bacterial genomes from directional (stranded) RNA-seq data. The R markdown scripts in this repository reconstruct the analysis presented in the *baerhunter* manuscript [Ozuna et al.]. The html output produced by knitr for each script is also provided. Below are instructions for running these scripts.
 
+### NOTE
+The *baerhunter* version used in the manuscript has been uploaded as a zipped archive under the src/ directory in this repository. The scripts presented below download and install baerhunter from its github repository (https://github.com/irilenia/baerhunter) but this could change over time, so to reproduce the numbers in the paper, eventually one may have to use the frozen version in the src/.
+
 ## Setup
 Create a local directory where the input and output files can be stored. We will assume here this directory has been created and will refer to it as the "project" directory. Under the *project* directory, create a directory called *docs* and download in it all .Rmd scripts from the docs directory in this repository (alternatively, simply clone this repository into a repository on your local computer).
 
