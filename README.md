@@ -9,9 +9,9 @@ The *baerhunter* version used in the manuscript has been uploaded as a zipped ar
 ## Setup
 Create a local directory where the input and output files can be stored. We will assume here this directory has been created and will refer to it as the "project" directory. Under the *project* directory, create a directory called *docs* and download in it all .Rmd scripts from the docs directory in this repository (alternatively, simply clone this repository into a repository on your local computer).
 
-All scripts here require some data to work with. The data is too large to be part of this repository and it is stored instead at the Birkbeck Research Data repository (BiRD). The URI for the collection of files available for this project is: http://researchdata.bbk.ac.uk/id/eprint/40 . 
+All scripts here require some data to work with. The data is too large to be part of this repository and it has been deposited instead at Zenodo with DOI: 10.5281/zenodo.2643952 . The same data is also stored at the Birkbeck Research Data repository (BiRD). The URI for the collection of files available for this project is: http://researchdata.bbk.ac.uk/id/eprint/40 . 
 
-Download the file data_dir.tar.gz from BiRD and unpack it in the project directory:
+Download the file data_dir.tar.gz from Zenodo and unpack it in the project directory:
 ```{bash }
 tar zxvf data_dir.tar.gz
 ```
@@ -21,7 +21,7 @@ This should create a directory called *data* containing all data files needed fo
 ### The `simulation.Rmd` script
 The simulated data presented in the *baerhunter* manuscript can be reconstructed with the `simulation.Rmd` script. If the *data* directory has been unpacked properly, this script can be uploaded into Rstudio and run with `knitr` to simulate the reads produced in an artificial RNA-seq experiment (10 samples, 5 in one of two conditions) as described in the manuscript. All output will be under the newly created directory *output*. 
 
-If you would rather skip running this script, you can download the output from the same BiRD repository (file: *output_from_simulation.rmd.tar.gz*). You will need to unpack this file in the project directory in order to continue to the next step.
+If you would rather skip running this script, you can download the output from the same Zenodo repository (file: *output_from_simulation.rmd.tar.gz*). You will need to unpack this file in the project directory in order to continue to the next step.
 ```{bash }
 tar zxvf output_from_simulation.rmd.tar.gz
 ```
@@ -32,18 +32,18 @@ Here, we assume that the simulated data has already been produced and is located
 
 You will need the following additional files  to run this script:
 
-* Two directories containing the predictions of Rockhopper for the simulated data (these are used for comparison to baerhunter and are not necessary for the baerhunter runs). Download the data from BiRD (simulations directory):
+* Two directories containing the predictions of Rockhopper for the simulated data (these are used for comparison to baerhunter and are not necessary for the baerhunter runs). Download the data from Zenodo:
    + rockhopper_fastq_0.2_40_output.tar.gz
    + rockhopper_fastq_0.5_40_output.tar.gz
 Unpack the archives in the local directory:
 `output/simulations/paired_realistic_selected_sRNA_UTR/fc.20`
 (this directory should already exist under the project directory, if the instructions above have been followed).
 
-* The final `conditions.txt` should be downloaded from BiRD/simulations and copied to the same directory (output/simulations/paired_realistic_selected_sRNA_UTR/fc.20)
+* The final `conditions.txt` should be downloaded from Zenodo and copied to the same directory (output/simulations/paired_realistic_selected_sRNA_UTR/fc.20)
 
 If all the above is in place, the script `example_run_simulations.Rmd` should run to completion, producing a number of files, including bam files containing the mapped reads, gff3 files augmented with the new annotated features and directories with counts for all features.
 
-Again, if you prefer not to run the script, all output can be obtained from BiRD (file: `output_example_run_simulations_rmd.tar.gz`).
+Again, if you prefer not to run the script, all output can be obtained from Zenodo (file: `output_example_run_simulations_rmd.tar.gz`).
 
 ## Running baerhunter on real data (E-MTAB-1616)
 ### The `example_run_realdata*.Rmd` scripts
@@ -53,7 +53,7 @@ The second part of the analysis involves running baerhunter on a real RNA-seq da
 There are two scripts to run here. One, `example_run_realdata.Rmd`,  runs *baerhunter* for one choice of parameters (5-10) and is more concise and so more suitable for viewing; the other, `example_run_realdata_mult_cutoffs.Rmd`,  runs baerhunter for different combinations of cut-offs, thus including a lot of repetition in the calls to functions etc. The latter script is needed to reproduce all figures in the *baerhunter* manuscript.
 
 Both scripts require some files/directories to exist to run to completion. To set this up properly, download the file: `required_for_realdata_run.tar.gz` from
-BiRD/real_data and unpack it in the project directory:
+Zenodo and unpack it in the project directory:
 ```{bash }
 tar zxvf required_for_realdata_run.tar.gz
 ```
@@ -62,7 +62,7 @@ It is also assumed that the *data* directory and its contents are also present i
 
 After this, you should be able to run the script with *knitr* and produce the corresponding *html* files.
 
-If you do not wish to run the scripts but would like to see all output files, you can download the following file from BiRD/real_data:
+If you do not wish to run the scripts but would like to see all output files, you can download the following file from Zenodo:
 `output_example_run_realdata_mult_cutoffs_rmd.tar.gz`
 and unpack it locally for examination.
 
