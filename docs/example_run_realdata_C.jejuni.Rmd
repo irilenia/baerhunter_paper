@@ -1,0 +1,277 @@
+---
+title: "Comparison of baerhunter with ANNOgesic on C. jejuni; GSE38883 dataset"
+author: "Irilenia Nobeli"
+date: "2019/06/17"
+output: html_document
+
+---
+
+This markdown script is an example of how to run *baerhunter*; this is an R package that allows the user to build a list of putative non-coding RNAs from stranded RNA-seq data and add them to an existing genome annotation so that downstream analysis can be carried out on both coding and (putative) non-coding transcripts found in intergenic regions. 
+
+In this example walkthrough, we reproduce the real-data analysis presented in the *baerhunter* paper that compares baerhunter to, ANNOgesic, a more sophisticated approach that fully describes the non-coding transcriptome from RNA-seq data, supported by other types of data (such as TSS, RFAM etc). The data here originate from the  GEO dataset GSE38883 that was also used to benchmark the ANNOgesic software in the relevant publication. We use only the TEX-minus subset of the data and only the samples used by ANNOgesic (GSM951380, GSM951382; each associated with two runs).
+
+Reference
+A. Ozuna, D. Liberto, R. M. Joyce, K.B. Arnvig, I. Nobeli. baerhunter: An R package for the discovery and analysis of expressed non-coding regions in bacterial RNA-seq data.
+
+```{r "knitr config", cache = FALSE, include=FALSE}
+require("knitr")
+opts_chunk$set(echo = TRUE)
+# Set the root directory to the project directory so all paths
+# that follow will be relative to that directory
+opts_knit$set(root.dir = "../")
+```
+
+```{r setup, include=FALSE}
+library("Rsubread")
+library("Rsamtools")
+library("rtracklayer")
+library("ggplot2")
+
+# install and load the baerhunter package
+library("devtools")
+install_github("irilenia/baerhunter")
+library("baerhunter")
+
+# superheat package is only used here to make pretty heatmaps 
+devtools::install_github("rlbarter/superheat")
+library(superheat)
+
+```
+
+## Quick summary of this analysis
+The aim of this analysis is to produce Jaccard index values for the baerhunter predictions of sRNAs in the S. enterica dataset with SRA accession ID SRX1036363.
+* Reads have already been mapped prior to this analysis
+* The feature file (annotation) is updated to include expressed intergenic features and UTRs
+* Reads are counted against new annotation (can be skipped for the analysis here)
+
+### Required directory setup
+This script assumes a certain directory structure and it also assumes the existence of a number of files. For information on how to set this up and where to download the files required, read carefully the README file in the *baerhunter_paper* repository.
+
+
+## Mapping reads to the genome
+Normally, analysis would start with pre-processing the raw RNA-seq data and mapping the reads to a reference genome. This step is skipped here as reads have already been aligned (dataset is from E-GEOD-38883). Reads were pre-processed with *fastp* and mapped with *bwa aln*.
+
+```{r map_reads_to_genome}
+# Step skipped...
+```
+
+## Updating the genome annotation using the RNA-seq signal
+We start by calling baerhunter's *feature_file_editor()* function to predict intergenic elements (sRNAs and UTRs) based on the RNA-seq signal and existing annotation (available as a gff3 file).
+The bam files used in this analysis will be under the data/mapping/C.jejuni directory if the required data has been downloaded and unpacked as advised in the README file. 
+
+```{r update_the_genome_annotation}
+# Call baerhunter's feature_file_editor()
+feature_file_editor(bam_directory="data/mapping/C.jejuni/", 
+                    original_annotation_file = "C.jejuni_81116.gff3", 
+                    annot_file_dir = "data/",
+                    output_file="output/real_data/C.jejuni_5_10.gff3",
+                    original_sRNA_annotation="unknown", 
+                    low_coverage_cutoff=5, 
+                    high_coverage_cutoff=10, 
+                    min_sRNA_length=40, 
+                    min_UTR_length=50, 
+                    paired_end_data=FALSE, 
+                    strandedness="stranded")
+
+
+
+
+```
+
+
+## Overlap of predicted and known ncRNAs taken from "benchmark_sRNAs" table available from the ANNOgesic paper
+Here, we check whether the features predicted by *baerhunter* overlap with known sRNAs in C.jejuni, as listed in Campylobacter.csv file. In addition, we compare our Jaccard indices for all known sRNAs to those calculated for ANNOgesic and APERO in the APERO supplementary table. Baerhunter results for putative sRNAs only are referred to as *"baerhunter"* in the figure legends. Results for both putative sRNA and putative UTRs are referred to as *"baerhunter.all"*.
+
+```{r overlap_with_known_ncRNAs}
+compare_known_with_predicted <- function(annotation_file, known_RNA_file, minoverlap=1L) {
+
+  # create a directory to keep the results (like figures output)
+  system("mkdir output/real_data/C.jejuni_5_10/")
+  
+  # import the gff3 file using rtracklayer's import function
+  annot <- import.gff3(annotation_file)
+  
+  # create subsets of the putative sRNAs and UTRs first
+  pred.sRNA <- subset(annot, type == "putative_sRNA")
+  pred.UTR <- subset(annot, type == "putative_UTR")
+  num.pred.sRNA.plus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "+")) ) ) 
+  num.pred.sRNA.minus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "-")) ) ) 
+  num.pred.UTRs.plus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "+")) ) ) 
+  num.pred.UTRs.minus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "-")) ) ) 
+  # create a set with both sRNAs and UTRs
+  pred.all <- subset(annot, (type == "putative_sRNA" | type == "putative_UTR"))
+  
+  # read in the data from the supplementary table of the ANNOgesic publication
+  # (already exported to a text file with additional text removed - st=supptable)
+  st <- read.delim(file=known_RNA_file, header=TRUE,   sep="\t",  colClasses = c("character", "numeric", "numeric", "character"), comment.char = "#")
+  
+  dim(st)
+  known.all <- GRanges(seqnames="CP000814.1",  
+                ranges=IRanges(start=st[st[,"start"] < st[,"end"],"start"], 
+                               end=st[st[,"start"] < st[,"end"],"end"] ), 
+                               strand=st[,"strand"])
+  
+  
+  sRNA.hits <- findOverlaps(known.all, pred.sRNA, type="any", 
+                            minoverlap=minoverlap, ignore.strand=FALSE) 
+  UTR.hits <- findOverlaps(known.all, pred.UTR, type="any", 
+                           minoverlap=minoverlap, ignore.strand=FALSE) 
+  
+  all.hits <- findOverlaps(known.all, pred.all, type="any", 
+                           minoverlap=minoverlap, ignore.strand=FALSE) 
+  
+  #how many predicted hits  are confirmed? (note that some confirmed sRNAs in the list
+  #are almost identical so they will get hit possibly more than once by our predicted ncRNAs)
+  num_UTR_confirmed <- length(unique(subjectHits(UTR.hits)))
+  num_sRNA_confirmed <- length(unique(subjectHits(sRNA.hits)))
+  #this may not be the same as length(all.hits)...
+  num_all_confirmed <- length(unique(c(subjectHits(UTR.hits), subjectHits(sRNA.hits))))
+  num_all_confirmed.v2 <- length(unique(c(queryHits(UTR.hits), queryHits(sRNA.hits))))
+  
+  num_UTR_confirmed
+  num_sRNA_confirmed
+  num_all_confirmed 
+  
+  num_pred_UTR <- length(ranges(pred.UTR))
+  num_pred_sRNA <- length(ranges(pred.sRNA))
+  num_pred_UTR
+  num_pred_sRNA 
+
+  #how many from the known list have some overlap with our predictions (either sRNA or UTR)?
+  res.recall.sRNA <- length(unique(queryHits(sRNA.hits)))/dim(st)[1]
+  res.recall.sRNA
+  res.recall <- num_all_confirmed.v2/dim(st)[1] 
+  res.recall # 70.7%
+  
+  #width of the ranges of hits to known ncRNAs from sRNAs
+  width(ranges(known.all[queryHits(sRNA.hits),]))
+  #actual overlaps between known and predicted (width column gives the size of the overlap)
+  overlapsRanges(ranges(known.all), ranges(pred.sRNA), sRNA.hits)
+
+  #RESULTS BASED ON sRNA PREDICTIONS ONLY
+  #calculate the Jaccard index (intersect over the union for each hit)
+  p<- findOverlapPairs(known.all, pred.sRNA, type="any", minoverlap=1L, ignore.strand=FALSE) 
+  #then this gives the intersection between pairs
+  pintersect(p)
+  #and this gives the union
+  punion(p)
+  #Jaccard coefficient is then:
+  jaccard <- width(ranges(pintersect(p)))/width(ranges(punion(p)))
+  #these may contain duplicates; use the matrix m instead to calculate corresponding values
+  jac0 <- length(jaccard[jaccard > 0])
+  jac0.5 <- length(jaccard[jaccard > 0.5])
+  jac0.8 <- length(jaccard[jaccard > 0.8])
+  
+  
+  #add the Jaccard for baerhunter to the table 
+  #add zeroes first
+  st$baerhunter <- c(rep(0.0, dim(st)[1]))
+  #then add the values from above
+  st[queryHits(sRNA.hits), "baerhunter"] = jaccard
+  
+
+  #RESULTS FOR BOTH sRNA+UTR PREDICTIONS
+  #Note: here we are checking whether some of our UTR predictions essentially overlap
+  #known sRNAs and would have been classed as such, had there not been a CDS adjacent
+  #to them. The resulting heatmap suggests that this is indeed the case and looking
+  #at isolated examples confirms this.
+  p.all<- findOverlapPairs(known.all, pred.all, type="any", minoverlap=1L, ignore.strand=FALSE) 
+  #then this gives the intersection between pairs
+  pintersect(p.all)
+  #and this gives the union
+  punion(p.all)
+  #Jaccard coefficient is then:
+  jaccard.all <- width(ranges(pintersect(p.all)))/width(ranges(punion(p.all)))
+  # these may contain duplicates; use matrix m instead to calculate these values
+  jac0.all <- length(jaccard.all[jaccard.all > 0])
+  jac0.5.all <- length(jaccard.all[jaccard.all > 0.5])
+  jac0.8.all <- length(jaccard.all[jaccard.all > 0.8])
+  
+  st$baerhunter.all <- c(rep(0.0, dim(st)[1]))
+  st[queryHits(all.hits), "baerhunter.all"] = jaccard.all
+  
+  #Some of the known sRNAs may not be expressed, may be shorter than 40 nt or may overlap current annotation (in all these cases we cannot predict them with default parameters)
+  #They are:
+  #Cjnc22 (439584-439684:+) is included in CDS at (438066-439889)
+  #crRNA1 (1440760-1440797+) and all other crRNAs nearby: they are too short for our standard algorithm to pick them up (we used a parameter of min length of 40); they are also too close together so baerhunter sees them as one transcript, hence the low Jaccard score
+  #TracrRNA (1441156-1441193:+): this is part of the same cluster as the crRNAs above
+  #CJnc170 (1542619-1542645:+): this is shorter than our cutoff length
+  
+  #Note also that the following had no complete coordinates in the original file
+  #(only had start or only end) and so to be able to create the GRanges objects 
+  #I set the unknown limit to the end of the last read corresponding to this region
+  #(using all 4 bam files) but of course there is no guarantee that this limit 
+  #matches the actual end of the transcript :
+  # row 5 (CJnc22  439584  439684  +) - NOT DONE
+  # row 29 (CJas_Cj0704     671099  671301  -)
+  # row 30 CJas_Cj0168c    174436  174643  +
+  # row 31 CJas_CJJ81176_1020      947560  947712  +
+  
+  #will set impossible to predict values to a negative number so they can be represented in a different colour
+  st[st$name == "CJnc22", "baerhunter"] = -1
+  st[st$name == "CJnc22", "baerhunter.all"] = -1
+  m <- st[,c(1, 5:6) ]
+  
+  #calculate medians without this value
+  median(c(m[1:4,3], m[5:31, 3]))
+  median(c(m[1:4,2], m[5:31, 2]))
+  
+  table(m[,2] >0)
+  table(m[,3] >0)
+
+  png(file="output/real_data/C.jejuni_5_10/heatmap.png", height=900, width =800)
+  superheat(m[,2:3],  membership.rows =as.character(t(m[, "name"])), 
+            left.label.size = 0.1, 
+            left.label.text.size = 4, 
+            left.label.text.col=c(rep("black", 4), "red", rep("black", 10), rep("red", 7), "black", "red", rep("black", 4), "orange", "orange", "orange"),
+            extreme.values.na=TRUE, 
+            heat.na.col="red", 
+            heat.lim=c(0,1) )
+  dev.off()
+  
+  pdf(file="output/real_data/C.jejuni_5_10/heatmap.pdf")
+  superheat(m[,2:3],  membership.rows =as.character(t(m[, "name"])), 
+            left.label.size = 0.1, 
+            left.label.text.size = 4, 
+            left.label.text.col=c(rmep("black", 4), "red", rep("black", 10), rep("red", 7), "black", "red", rep("black", 4), "orange", "orange", "orange"),
+            extreme.values.na=TRUE, 
+            heat.na.col="red", 
+            heat.lim=c(0,1) )
+  dev.off()
+  
+  superheat(m[,2:3],  membership.rows =as.character(t(m[, "name"])), 
+            left.label.size = 0.1, 
+            left.label.text.size = 3, 
+            left.label.text.col=c(rep("black", 4), "red", rep("black", 10), rep("red", 7), "black", "red", rep("black", 4), "orange", "orange", "orange"),
+            extreme.values.na=TRUE, 
+            heat.na.col="red", 
+            heat.lim=c(0,1) )
+  
+
+
+   boxplot(m[,2], m[,3], notch=TRUE, names=c("baerhunter", "baerhunter.all"), ylab="Jaccard Index")
+  
+  
+
+  res <- list(num_pred_UTR=num_pred_UTR, num_pred_sRNA=num_pred_sRNA,num_UTR_confirmed= num_UTR_confirmed, num_sRNA_confirmed=num_sRNA_confirmed, res.recall=res.recall, jac0=jac0, jac0.5=jac0.5, jac0.8=jac0.8, jac0.all=jac0.all, jac0.5.all=jac0.5.all, jac0.8.all=jac0.8.all, m=m)
+  
+  return(res)
+}
+
+# ****** CHECK BAERHUNTER RESULTS******* #
+# Run the function to carry out the comparisons between confirmed RNAs and predicted ones and comparisons between the APERO and ANNOgesic reported Jaccard indices
+res_5.10_1 <- compare_known_with_predicted(annotation_file="output/real_data/C.jejuni_5_10.gff3", minoverlap=1L, known_RNA_file ="data/ANNOgesic_Campylobacter.csv")
+
+res_5.10_1
+
+#NOTE we do not need to re-run with different overlap limits as the predictions are already showing overlaps greater than a minimum of 20 nucleotides. 
+
+
+```
+
+
+```{r session information}
+sessionInfo()
+
+```
+
