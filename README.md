@@ -66,6 +66,13 @@ If you do not wish to run the scripts but would like to see all output files, yo
 `output_example_run_realdata_mult_cutoffs_rmd.tar.gz`
 and unpack it locally for examination.
 
+## Running baerhunter on real data (S.enterica and C.jejuni)
+This additional analysis can be carried out using the R markdown scripts example_run_realdata_C.jejuni.Rmd   and example_run_realdata_S.enterica.Rmd (under docs/).
+If the data directory has been unpacked properly, these scripts should run without any other input.
+If you prefer not to run the scripts but only examine the output, download the following files from Zenodo:
+`output_C.jejuni.tar.gz` and `output_S.enterica.tar.gz` , unpack them locally and examine the output.
+
+
 ## Reference
 A. Ozuna, D. Liberto, R. M. Joyce, K.B. Arnvig, I. Nobeli. baerhunter: An R package for the discovery and analysis of expressed non-coding regions in bacterial RNA-seq data.
 
