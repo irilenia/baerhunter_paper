@@ -1,0 +1,204 @@
+---
+title: "Comparison of baerhunter with ANNOgesic (C.jejuni UTRs from GSE38883 dataset"
+author: "Irilenia Nobeli"
+date: "2019/07/25"
+output: html_document
+
+---
+
+This markdown script is an additional comparison between *baerhunter* and *ANNOgesic* included in the baerhunter manuscript (Ozuna et al. 2019).
+
+Here, we assume baerhunter has already been run on the C. jejuni dataset and its 5' UTR predictions are compared with those of ANNOgesic using the subset of manually annotated TSS provided in the ANNOgesic paper. ANNOgesic's parameters were optimised using this manual annotation in the original paper, hence, this is more of a test for baerhunter as we know ANNOgesic's performance on these should be very good.
+
+The data here originate from the  GEO dataset GSE38883 that was also used to benchmark the ANNOgesic software in the relevant publication. We use only the TEX-minus subset of the data and only the samples used by ANNOgesic (GSM951380, GSM951382; each associated with two runs).
+
+Reference
+A. Ozuna, D. Liberto, R. M. Joyce, K.B. Arnvig, I. Nobeli. baerhunter: An R package for the discovery and analysis of expressed non-coding regions in bacterial RNA-seq data.
+
+```{r "knitr config", cache = FALSE, include=FALSE}
+require("knitr")
+opts_chunk$set(echo = TRUE)
+# Set the root directory to the project directory so all paths
+# that follow will be relative to that directory
+opts_knit$set(root.dir = "../")
+```
+
+```{r setup, include=FALSE}
+library("Rsubread")
+library("Rsamtools")
+library("rtracklayer")
+
+
+```
+
+## Quick summary of this analysis
+The aim of this analysis is to compare baerhunter predictions of 5' UTRs in the C. jejuni dataset with the ground truth data derived from manually annotated TSS for a 200kbp region by the ANNOgesic team.
+* Baerhunter has already been run for this dataset and an updated GFF3 files has been produced
+* The manual annotation of TSS is taken from Table S7 of the ANNOgesic publication
+* The predictions of 5'UTR by ANNOgesic are taken from their Zenodo repository of analyses and scripts relevant to this publication: https://zenodo.org/record/1161115#.XTgWjpNKiL8
+
+
+### Required directory setup
+This script assumes a certain directory structure For information on how to set this up and where to download the files required, read carefully the README file in the *baerhunter_paper* repository.
+
+
+## Overlap of predicted and known 5' UTRs taken from the manually annotated subset of TSS in the ANNOgesic publication. 
+Here, we check whether the features predicted by *baerhunter* overlap with predictions of 5' UTRs based on manual annotation of a subset of TSS. 
+
+```{r overlap_with_known_5pUTRs}
+compare_known_with_predicted <- function(annotation_file, known_TSS_file, other_program_predictions, maxgap=1L) {
+
+  # we assume a directory called output/real_data/C.jejuni_5_10/ already exists 
+  
+  # the following notin operator is used further down in the analysis
+  `%notin%` <- Negate(`%in%`)
+  
+  # import the baerhunter gff3 file using rtracklayer's import function
+  annot <- import.gff3(annotation_file)
+  
+  # create subsets of the putative sRNA and UTRs first
+  pred.sRNA <- subset(annot, type == "putative_sRNA")
+  pred.UTR <- subset(annot, type == "putative_UTR")
+  num.pred.sRNA.plus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "+")) ) ) 
+  num.pred.sRNA.minus <- length(ranges(subset(annot, (type == "putative_sRNA") & (strand == "-")) ) ) 
+  num.pred.UTRs.plus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "+")) ) ) 
+  num.pred.UTRs.minus <- length(ranges(subset(annot, (type == "putative_UTR") & (strand == "-")) ) ) 
+  
+  num.pred.sRNA <- num.pred.sRNA.plus + num.pred.sRNA.minus
+  num.pred.UTR <- num.pred.UTRs.plus + num.pred.UTRs.minus
+ 
+  # create a set with both sRNAs and UTRs
+  pred.all <- subset(annot, (type == "putative_sRNA" | type == "putative_UTR"))
+   
+  # get the annotation of 5' UTRs from the ANNOgesic gff file
+  annot.2 <- import.gff3(other_program_predictions)
+  pred.5pUTR.2 <- subset(annot.2, type == "5UTR")   #not strictly needed as file only contains these predictions (there should be 560 predictions)
+  
+  # read in the TSS data from the supplementary table of the ANNOgesic publication
+  st <- read.delim(file=known_TSS_file, header=TRUE,   skip=1, sep=",",  colClasses = c("character", "character", "character", "numeric", "numeric", "character", "character", "character"), comment.char = "#")
+  
+  dim(st) # there should be 269 manually assigned TSS
+  # we set the sequence names to the same name used in the baerhunter gff
+  TSS.gr <- GRanges(seqnames="CP000814.1",  
+                ranges=IRanges(start=st[,"start"], 
+                               end=st[,"end"]), 
+                               strand=st[,"strand"])
+  
+   
+  # baerhunter does not explicitly annotate the UTR as 5' or 3' so we need to isolate the 5' ones first (as we only have evidence for those when using TSS)
+  CDS.plus <- subset(annot, (type == "CDS") & (strand == "+"))
+  pred.UTR.plus <- subset(annot, (type == "putative_UTR") & (strand == "+"))
+  adj.pairs <- findOverlapPairs(CDS.plus, pred.UTR.plus, maxgap=1L)
+  #the following extracts the pred.UTR.plus that satisfy the adjacency condition
+  tmp.pred.5pUTR.plus <- second(subset(adj.pairs, start(first) == end(second) + 1L))
+  #We also need to exclude 5' UTRs that are within operons as we often cannot tell whether they belong to the upstream or downstream gene and there is usually no TSS associated with them
+  #cross the 5p UTRs with the CDS again:
+  adj.pairs <- findOverlapPairs(CDS.plus, tmp.pred.5pUTR.plus, maxgap=1L)
+  #and select the ones that are not 3' to any CDS
+  rem.UTR <- second(subset(adj.pairs, start(second) == end(first) + 1L))
+  pred.5pUTR.plus <- second(adj.pairs)[!(second(adj.pairs) %in% rem.UTR),]
+  num.pred.UTR.plus <- length(ranges(pred.UTR.plus))
+  num.pred.5pUTR.plus <- length(ranges(pred.5pUTR.plus))
+  
+  # repeat for the (-) strand
+  CDS.minus <- subset(annot, (type == "CDS") & (strand == "-"))
+  pred.UTR.minus <- subset(annot, (type == "putative_UTR") & (strand == "-"))
+  adj.pairs <- findOverlapPairs(CDS.minus, pred.UTR.minus, maxgap=1L)
+  #the following extracts the pred.UTR.minus that satisfy the adjacency condition
+  tmp.pred.5pUTR.minus <- second(subset(adj.pairs, start(second) == end(first) + 1L))
+  #We also need to exclude 5' UTRs that are within operons as we cannot tell whether they belong to the upstream or downstream gene and there is usually no TSS associated with them
+  #cross the 5p UTRs with the CDS again:
+  adj.pairs <- findOverlapPairs(CDS.minus, tmp.pred.5pUTR.minus, maxgap=1L)
+  #and select the ones that are not 3' to any CDS
+  #NOTE: initial submission had a bug and the equation below had + 1L rather than -1L so no UTRs were removed from the minus strand.
+  #OLD: rem.UTR <- second(subset(adj.pairs, end(second) == start(first) + 1L))
+  #NEW below:
+  rem.UTR <- second(subset(adj.pairs, end(second) == start(first) - 1L))
+  pred.5pUTR.minus <- second(adj.pairs)[!(second(adj.pairs) %in% rem.UTR),]
+  num.pred.UTR.minus <- length(ranges(pred.UTR.minus))
+  num.pred.5pUTR.minus <- length(ranges(pred.5pUTR.minus))
+  
+  # IMPORTANT: the manually annotated TSS go up to coordinate 399840 (they are only a subset of all TSS predicted by 5' sequencing), hence we need to compare our predictions only up to that point in the genomic sequence
+  pred.5pUTR.plus.subset <- subset(pred.5pUTR.plus, start < 399841) # 24 left
+  pred.5pUTR.minus.subset <- subset(pred.5pUTR.minus, end < 399841) # 9 left
+  
+  length(ranges(pred.5pUTR.plus.subset))
+  length(ranges(pred.5pUTR.minus.subset))
+  
+  # find the overlap between predicted 5' UTRs and the known TSS
+  # If type is "start" the intervals are required to have matching starts
+  # - the maxgap parameter then means the maximum difference allowed in the starts
+  hits_tss_pred.UTR.plus <- findOverlaps(TSS.gr, pred.5pUTR.plus.subset, type="start", maxgap=maxgap)
+  #query is TSS.gr; subject is pred.5pUTR.plus.subset
+  ranges(pred.5pUTR.plus.subset[unique(subjectHits(hits_tss_pred.UTR.plus)) ,]) #15 of the 24 are within 10 bases of a TSS
+  #repeat with maxgap=10L
+  hits_tss_pred.UTR.plus <- findOverlaps(TSS.gr, pred.5pUTR.plus.subset, type="start", maxgap=10L)
+  ranges(pred.5pUTR.plus.subset[unique(subjectHits(hits_tss_pred.UTR.plus)) ,])
+  pred.5pUTR.plus.subset.within.10nt <- pred.5pUTR.plus.subset[unique(subjectHits(hits_tss_pred.UTR.plus)) ,]
+  
+  #which ranges are NOT supported by TSS
+  notsupported<- which(1:length(pred.5pUTR.plus.subset) %notin% subjectHits(hits_tss_pred.UTR.plus))
+  ranges(pred.5pUTR.plus.subset[notsupported,]) #there should be 6 of them at maxgap=10L
+         
+  
+  hits_tss_pred.UTR.minus <- findOverlaps(TSS.gr, pred.5pUTR.minus.subset, type="end", maxgap=maxgap)
+  ranges(pred.5pUTR.minus.subset[unique(subjectHits(hits_tss_pred.UTR.minus)) ,]) 
+  notsupported.minus<- which(1:length(pred.5pUTR.minus.subset) %notin% subjectHits(hits_tss_pred.UTR.minus))
+  ranges(pred.5pUTR.minus.subset[notsupported.minus,])
+  #repeat with maxgap=10L
+  hits_tss_pred.UTR.minus <- findOverlaps(TSS.gr, pred.5pUTR.minus.subset, type="end", maxgap=10L)
+  ranges(pred.5pUTR.minus.subset[unique(subjectHits(hits_tss_pred.UTR.minus)) ,]) #5 of the 9 are within 10 bases of a TSS
+  pred.5pUTR.minus.subset.within.10nt <- pred.5pUTR.minus.subset[subjectHits(hits_tss_pred.UTR.minus) ,]
+  notsupported.minus<- which(1:length(pred.5pUTR.minus.subset) %notin% subjectHits(hits_tss_pred.UTR.minus))
+  ranges(pred.5pUTR.minus.subset[notsupported.minus,])
+  
+  # now check how many of the annotated TSS fall within less than 50 nt of a CDS start and hence couldn't be counted by baehunter
+  # consider all TSS first
+  # find all CDS in the annotation
+  CDS.gr <- subset(annot, (type == "CDS")) #1626 in total
+  # then check overlap with TSS
+  short.utrs.plus <- findOverlaps(CDS.plus, TSS.gr, type="start", maxgap=49L) 
+  ranges(TSS.gr[unique(subjectHits(short.utrs.plus)),]) # 46 TSS on the (+) strand would correspond to 5' UTRs that are too short
+  short.utrs.minus <- findOverlaps(CDS.minus, TSS.gr, type="end", maxgap=49L) 
+  ranges(TSS.gr[unique(subjectHits(short.utrs.minus)),]) # 61 TSS on the (-) strand would correspond to 5' UTRs that are too short
+  
+  # repeat for ANNOgesic
+  # need to change sequence names first
+  seqlevels(pred.5pUTR.2) <- c("CP000814.1")
+  pred.5pUTR.2.plus.subset <- subset(pred.5pUTR.2, end < 399841 & strand=="+")
+  hits_tss_pred.5pUTR.plus <- findOverlaps(TSS.gr, pred.5pUTR.2.plus.subset, type="start", maxgap=maxgap) # 70 hits for maxgap=5
+  ranges(pred.5pUTR.2.plus.subset[unique(subjectHits(hits_tss_pred.5pUTR.plus)) ,]) #68 hits
+  
+  pred.5pUTR.2.minus.subset <- subset(pred.5pUTR.2, end < 399841 & strand=="-")
+  hits_tss_pred.5pUTR.minus <- findOverlaps(TSS.gr, pred.5pUTR.2.minus.subset, type="end", maxgap=maxgap) # 74 hits for maxgap=5
+  ranges(pred.5pUTR.2.minus.subset[unique(subjectHits(hits_tss_pred.5pUTR.minus)) ,]) #74 hits
+  
+  
+
+  res <- list(num.pred.UTR=num.pred.UTR, 
+              num.pred.sRNA=num.pred.sRNA, 
+              num.pred.5pUTR.plus = num.pred.5pUTR.plus, 
+              num.pred.5pUTR.minus= num.pred.5pUTR.minus,
+              pred.5pUTR.plus.subset = pred.5pUTR.plus.subset,
+              pred.5pUTR.minus.subset = pred.5pUTR.minus.subset,
+              pred.5pUTR.plus.subset.within.10nt = pred.5pUTR.plus.subset.within.10nt,
+              pred.5pUTR.minus.subset.within.10nt = pred.5pUTR.minus.subset.within.10nt
+              )
+  
+  return(res)
+}
+
+# ****** CHECK BAERHUNTER RESULTS******* #
+# Run the function to carry out the comparisons between confirmed 5p UTRs and predicted ones for both ANNOgesic and baerhunter using Jaccard indices
+res_5.10_1 <- compare_known_with_predicted(annotation_file="output/real_data/C.jejuni_5_10.gff3", maxgap=5L, known_TSS_file ="data/ANNOgesic_Table_S7_TSS_C.jejuni.csv", other_program_predictions="data/ANNOgesic_NC_009839.1_5UTR.gff")
+
+res_5.10_1
+
+```
+
+
+```{r session information}
+sessionInfo()
+
+```
+
