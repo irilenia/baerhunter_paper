@@ -9,7 +9,7 @@ The *baerhunter* version used in the manuscript has been uploaded as a zipped ar
 ## Setup
 Create a local directory where the input and output files can be stored. We will assume here this directory has been created and will refer to it as the "project" directory. Under the *project* directory, create a directory called *docs* and download in it all .Rmd scripts from the docs directory in this repository (alternatively, simply clone this repository into a repository on your local computer).
 
-All scripts here require some data to work with. The data is too large to be part of this repository and it has been deposited instead at Zenodo: http://doi.org/10.5281/zenodo.3253332. The Mtb data/scripts are also stored at the Birkbeck Research Data repository (BiRD). The URI for the collection of files available for this project is: http://researchdata.bbk.ac.uk/id/eprint/40 . 
+All scripts here require some data to work with. The data is too large to be part of this repository and it has been deposited instead at Zenodo: http://doi.org/10.5281/zenodo.3352787. The Mtb data/scripts are also stored at the Birkbeck Research Data repository (BiRD). The URI for the collection of files available for this project is: http://researchdata.bbk.ac.uk/id/eprint/40 . 
 
 Download the file data_dir.tar.gz from Zenodo and unpack it in the project directory:
 ```{bash }
