@@ -1,7 +1,7 @@
 ---
 title: "Example run of baerhunter on real RNA-seq data (using multiple cut-offs)"
 author: "Irilenia Nobeli"
-date: "2019/04/16"
+date: "2019/07/25"
 output: html_document
 
 ---
@@ -29,7 +29,7 @@ library("ggplot2")
 
 # install and load the baerhunter package
 library("devtools")
-install_github("irilenia/baerhunter")
+#install_github("irilenia/baerhunter")
 library("baerhunter")
 
 ```
@@ -743,7 +743,7 @@ compare_TSS_with_predicted <- function(annotation_file, tss.gr, maxgap=-1L) {
   #cross the 5p UTRs with the CDS again:
   adj.pairs <- findOverlapPairs(CDS.minus, tmp.pred.5pUTR.minus, maxgap=1L)
   #and select the ones that are not 3' to any CDS
-  rem.UTR <- second(subset(adj.pairs, end(second) == start(first) + 1L))
+  rem.UTR <- second(subset(adj.pairs, end(second) == start(first) - 1L))
   pred.5pUTR.minus <- second(adj.pairs)[!(second(adj.pairs) %in% rem.UTR),]
   num.pred.UTR.minus <- length(ranges(pred.UTR.minus))
   num.pred.5pUTR.minus <- length(ranges(pred.5pUTR.minus))
@@ -844,7 +844,7 @@ df$labels <- factor(df$labels, levels=c('all', 'TSS(1)', 'TSS(5)', 'TSS(10)', 'T
 
 p <- ggplot(data=df, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)), fill=labels)) +
     geom_bar(stat="identity", position=position_dodge()) +
-    scale_y_continuous(limits=c(0, 400)) +
+    scale_y_continuous(limits=c(0, 300)) +
     xlab("Strand") +
     ylab("Number of predicted 5'UTRs") +
     labs(fill='') +
@@ -854,7 +854,9 @@ p <- ggplot(data=df, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)), 
     theme(plot.title = element_text(size=17)) +
     theme(text = element_text(size = 17)) 
 p
-
+tiff(filename="output/real_data/SuppFig7B.tiff")
+p 
+dev.off()
 
 #high expression only 
 v.y  <- c(tss_high5.10_5[5], tss_high5.10_1[9], tss_high5.10_5[9], tss_high5.10_10[9], tss_high5.10_20[9], tss_high5.10_5[6], tss_high5.10_1[10], tss_high5.10_5[10], tss_high5.10_10[10], tss_high5.10_20[10])
@@ -892,7 +894,7 @@ df$labels <- factor(df$labels, levels=c('all', 'TSS(1)', 'TSS(5)', 'TSS(10)', 'T
 
 p <- ggplot(data=df, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)), fill=labels)) +
     geom_bar(stat="identity", position=position_dodge()) +
-    scale_y_continuous(limits=c(0, 350)) +
+    scale_y_continuous(limits=c(0, 300)) +
     xlab("Strand") +
     ylab("Number of predicted 5'UTRs") +
     labs(fill='') +
@@ -902,6 +904,10 @@ p <- ggplot(data=df, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)), 
     theme(plot.title = element_text(size=17)) +
     theme(text = element_text(size = 17)) 
 p
+
+tiff(filename="output/real_data/SuppFig7A.tiff")
+p 
+dev.off()
 
 # Cut-off 2-20
 v.y  <- c(tss_2.20_5[5], tss_2.20_1[9], tss_2.20_5[9], tss_2.20_10[9], tss_2.20_20[9], tss_2.20_5[6], tss_2.20_1[10], tss_2.20_5[10], tss_2.20_10[10], tss_2.20_20[10])
@@ -1074,6 +1080,9 @@ p <- ggplot(data=df.rh, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)
     theme(text = element_text(size = 17)) 
 p
 
+tiff(filename="output/real_data/SuppFig7C.tiff")
+p 
+dev.off()
 
 
 # Using parameters 0.2/40
@@ -1095,7 +1104,7 @@ df.rh$labels <- factor(df.rh$labels, levels=c('all', 'TSS(1)', 'TSS(5)', 'TSS(10
 # df$v.y is factor and needs to be numeric
 p <- ggplot(data=df.rh, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)), fill=labels)) +
     geom_bar(stat="identity", position=position_dodge()) +
-    scale_y_continuous(limits=c(0, 700)) +
+    scale_y_continuous(limits=c(0, 500)) +
     xlab("Strand") +
     ylab("Number of predicted 5'UTRs") +
     labs(fill='') +
@@ -1106,6 +1115,9 @@ p <- ggplot(data=df.rh, aes(x=strand, y=as.numeric(as.character(num_pred_5pUTRs)
     theme(text = element_text(size = 17)) 
 p
 
+tiff(filename="output/real_data/SuppFig7D.tiff")
+p 
+dev.off()
 
 
 # Rockhopper sRNA predictions #

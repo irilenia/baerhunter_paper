@@ -1,7 +1,7 @@
 ---
 title: "Example run of baerhunter on real RNA-seq data"
 author: "Irilenia Nobeli"
-date: "2019/04/16"
+date: "2019/07/25"
 output: html_document
 
 ---
@@ -29,7 +29,7 @@ library("ggplot2")
 
 # install and load the baerhunter package
 library("devtools")
-install_github("irilenia/baerhunter")
+#install_github("irilenia/baerhunter")
 library("baerhunter")
 
 ```
@@ -468,7 +468,7 @@ compare_TSS_with_predicted <- function(annotation_file, tss.gr, maxgap=-1L) {
   #cross the 5p UTRs with the CDS again:
   adj.pairs <- findOverlapPairs(CDS.minus, tmp.pred.5pUTR.minus, maxgap=1L)
   #and select the ones that are not 3' to any CDS
-  rem.UTR <- second(subset(adj.pairs, end(second) == start(first) + 1L))
+  rem.UTR <- second(subset(adj.pairs, end(second) == start(first) - 1L))
   pred.5pUTR.minus <- second(adj.pairs)[!(second(adj.pairs) %in% rem.UTR),]
   num.pred.UTR.minus <- length(ranges(pred.UTR.minus))
   num.pred.5pUTR.minus <- length(ranges(pred.5pUTR.minus))

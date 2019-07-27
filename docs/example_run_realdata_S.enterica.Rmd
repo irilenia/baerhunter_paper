@@ -1,14 +1,14 @@
 ---
-title: "Comparison of baerhunter with APERO on S. enterica; SRX1036363 dataset"
+title: "Comparison of baerhunter with APERO (S. enterica, SRX1036363 dataset)"
 author: "Irilenia Nobeli"
-date: "2019/06/13"
+date: "2019/07/23"
 output: html_document
 
 ---
 
 This markdown script is an example of how to run *baerhunter*; this is an R package that allows the user to build a list of putative non-coding RNAs from stranded RNA-seq data and add them to an existing genome annotation so that downstream analysis can be carried out on both coding and (putative) non-coding transcripts found in intergenic regions. 
 
-In this example walkthrough, we reproduce the real-data analysis presented in the *baerhunter* paper that compares baerhunter to, APERO, a more sophisticated approach to identifying short non-coding RNA transcripts from paired-end data. The data originate from the  SRA dataset SRX1036363 that was also used to benchmark the APERO software in the relevant publication (https://doi.org/10.1093/nar/gkz485). 
+In this example walkthrough, we reproduce the real-data analysis presented in the *baerhunter* paper that compares baerhunter to APERO, a more sophisticated approach for identifying short non-coding RNA transcripts from paired-end data. The data originate from the  SRA dataset SRX1036363 that was also used to benchmark the APERO software in the relevant publication (https://doi.org/10.1093/nar/gkz485). 
 
 Reference
 A. Ozuna, D. Liberto, R. M. Joyce, K.B. Arnvig, I. Nobeli. baerhunter: An R package for the discovery and analysis of expressed non-coding regions in bacterial RNA-seq data.
@@ -205,6 +205,17 @@ compare_known_with_predicted <- function(annotation_file, known_RNA_file, minove
   m<- st2[208:1, c(1, 5:6, 16:17)]
   superheat(m[,2:5], membership.rows =as.character(t(m[, "sRNA.name."])), left.label.size = 0.1, left.label.text.size = 3)
   dev.off()
+  
+  # create table with binned Jaccard indices, as suggested by reviewer
+  jacc.values <- as.numeric(as.vector(as.matrix(m[,2:5])))
+  bins <- cut(jacc.values, breaks = seq(min(jacc.values), max(jacc.values), len = 6),  include.lowest = TRUE)
+  m.bins <- matrix(bins, nrow=208, ncol=4)
+  table(m.bins[,1])
+  table(m.bins[,2])
+  table(m.bins[,3])
+  table(m.bins[,4])
+  t<- data.frame(cbind(table(m.bins[,1]), table(m.bins[,2]),table(m.bins[,3]), table(m.bins[,4])))
+  colnames(t) <- colnames(m[,2:5])
   
   png(file="output/real_data/S.enterica_5_10/boxplots.png", height=500, width =600)
   boxplot(m[,2], m[,3], m[,4], m[,5], notch=TRUE, names=c("ANNOgesic", "APERO", "baerhunter", "baerhunter.all"), ylab="Jaccard Index")
